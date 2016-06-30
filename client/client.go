@@ -1,4 +1,4 @@
-package fdfs_client
+package client
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 )
 
 var (
-    trackerConf          string                     = "./client.conf"
+    trackerConf          string                     = "./config/client.conf"
     trackerCFG           *TrackerCFG                = nil
     trackerMinConn       int                        = 10
     trackerMaxConn       int                        = 150
