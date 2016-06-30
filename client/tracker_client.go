@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"net"
+	"fmt"
 )
 
 type TrackerClient struct {
@@ -29,7 +30,7 @@ func (this *TrackerClient) trackerQueryStorageStorWithoutGroup() (*StorageServer
 
 	th.recvHeader(conn)
 	if th.status != 0 {
-		return nil, Errno{int(th.status)}
+		return nil, Errno{int(th.status), "QueryStorage"}
 	}
 
 	var (
@@ -40,8 +41,7 @@ func (this *TrackerClient) trackerQueryStorageStorWithoutGroup() (*StorageServer
 	)
 	recvBuff, _, err = TcpRecvResponse(conn, th.pkgLen)
 	if err != nil {
-		logger.Warnf("TcpRecvResponse error :%s", err.Error())
-		return nil, err
+		return nil, fmt.Errorf("TcpRecvResponse error :%s", err.Error())
 	}
 	buff := bytes.NewBuffer(recvBuff)
 	// #recv_fmt |-group_name(16)-ipaddr(16-1)-port(8)-store_path_index(1)|
@@ -89,8 +89,7 @@ func (this *TrackerClient) trackerQueryStorageStorWithGroup(groupName string) (*
 
 	th.recvHeader(conn)
 	if th.status != 0 {
-		logger.Warnf("recvHeader error [%d]", th.status)
-		return nil, Errno{int(th.status)}
+		return nil, Errno{int(th.status), "recvHeader error"}
 	}
 
 	var (
@@ -100,8 +99,7 @@ func (this *TrackerClient) trackerQueryStorageStorWithGroup(groupName string) (*
 	)
 	recvBuff, _, err = TcpRecvResponse(conn, th.pkgLen)
 	if err != nil {
-		logger.Warnf("TcpRecvResponse error :%s", err.Error())
-		return nil, err
+		return nil, fmt.Errorf("TcpRecvResponse error :%s", err.Error())
 	}
 	buff := bytes.NewBuffer(recvBuff)
 	// #recv_fmt |-group_name(16)-ipaddr(16-1)-port(8)-store_path_index(1)|
@@ -161,8 +159,7 @@ func (this *TrackerClient) trackerQueryStorage(groupName string, remoteFilename 
 
 	th.recvHeader(conn)
 	if th.status != 0 {
-		logger.Warnf("recvHeader error [%d]", th.status)
-		return nil, Errno{int(th.status)}
+		return nil, Errno{int(th.status), "recvHeader error" }
 	}
 
 	var (
@@ -172,8 +169,7 @@ func (this *TrackerClient) trackerQueryStorage(groupName string, remoteFilename 
 	)
 	recvBuff, _, err = TcpRecvResponse(conn, th.pkgLen)
 	if err != nil {
-		logger.Warnf("TcpRecvResponse error :%s", err.Error())
-		return nil, err
+		return nil, fmt.Errorf("TcpRecvResponse error :%s", err.Error())
 	}
 	buff := bytes.NewBuffer(recvBuff)
 	// #recv_fmt |-group_name(16)-ipaddr(16-1)-port(8)-store_path_index(1)|

@@ -6,16 +6,16 @@ import (
 	"io"
 	"os"
 	"strings"
-
-	"github.com/weilaihui/goconfig/config"
+	//"fdfs_client/config"
 )
 
 type Errno struct {
 	status int
+	msg    string
 }
 
 func (e Errno) Error() string {
-	errmsg := fmt.Sprintf("errno [%d] ", e.status)
+	errmsg := fmt.Sprintf("errno [%d] %s ", e.status, e.msg)
 	switch e.status {
 	case 17:
 		errmsg += "File Exist"
@@ -25,15 +25,15 @@ func (e Errno) Error() string {
 	return errmsg
 }
 
-type FdfsConfigParser struct{}
-
-var (
-	ConfigFile *config.Config
-)
-
-func (this *FdfsConfigParser) Read(filename string) (*config.Config, error) {
-	return config.ReadDefault(filename)
-}
+//type FdfsConfigParser struct{}
+//
+//var (
+//	ConfigFile *config.Config
+//)
+//
+//func (this *FdfsConfigParser) Read(filename string) (*config.Config, error) {
+//	return config.ReadDefault(filename)
+//}
 
 func fdfsCheckFile(filename string) error {
 	if _, err := os.Stat(filename); err != nil {
@@ -46,7 +46,7 @@ func readCstr(buff io.Reader, length int) (string, error) {
 	str := make([]byte, length)
 	n, err := buff.Read(str)
 	if err != nil || n != len(str) {
-		return "", Errno{255}
+		return "", Errno{255 ,"ReadCstr"}
 	}
 
 	for i, v := range str {
@@ -66,7 +66,7 @@ func getFileExt(filename string) string {
 }
 
 func splitRemoteFileId(remoteFileId string) ([]string, error) {
-	parts := strings.SplitN(remoteFileId, "/", 2)
+	parts := strings.SplitN(remoteFileId, string(os.PathSeparator), 2)
 	if len(parts) < 2 {
 		return nil, errors.New("error remoteFileId")
 	}

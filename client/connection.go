@@ -51,6 +51,7 @@ func NewConnectionPool(hosts []string, port int, minConns int, maxConns int) (*C
 	return cp, nil
 }
 
+//TODO May Cause Some Problem
 func (this *ConnectionPool) Get() (net.Conn, error) {
 	conns := this.getConns()
 	if conns == nil {
@@ -105,6 +106,7 @@ func (this *ConnectionPool) Len() int {
 	return len(this.getConns())
 }
 
+//TODO May Not Sure Connect All Tracker Server
 func (this *ConnectionPool) makeConn() (net.Conn, error) {
 	host := this.hosts[rand.Intn(len(this.hosts))]
 	addr := fmt.Sprintf("%s:%d", host, this.port)

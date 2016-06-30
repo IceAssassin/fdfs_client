@@ -6,28 +6,47 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-
-	"github.com/Sirupsen/logrus"
+	"fdfs_client/config"
 )
 
 var (
-	logger                                          = logrus.New()
+    trackerConf          string                     = "./client.conf"
+    trackerCFG           *TrackerCFG                = nil
+    trackerMinConn       int                        = 10
+    trackerMaxConn       int                        = 150
+	storageMinConn       int                        = 10
+	storageMaxConn       int                        = 150
+
+	trackerPoolChan      chan *trackerPool          = make(chan *trackerPool, 1)
+	trackerPoolMap       map[string]*ConnectionPool = make(map[string]*ConnectionPool)
+	fetchTrackerPoolChan chan interface{}          = make(chan interface{}, 1)
+    quitTrackerLoop      chan bool
+
 	storagePoolChan      chan *storagePool          = make(chan *storagePool, 1)
 	storagePoolMap       map[string]*ConnectionPool = make(map[string]*ConnectionPool)
-	fetchStoragePoolChan chan interface{}           = make(chan interface{}, 1)
-	quit                 chan bool
+	fetchStoragePoolChan chan interface{}          = make(chan interface{}, 1)
+	quitStorageLoop      chan bool
 )
 
 type FdfsClient struct {
-	tracker     *Tracker
+	//tracker     *Tracker
 	trackerPool *ConnectionPool
 	timeout     int
 }
 
-type Tracker struct {
+type TrackerCFG struct {
 	HostList []string
 	Port     int
 }
+
+type trackerPool struct {
+	trackerPoolKey string
+	host          string
+	port           int
+	minConns       int
+	maxConns       int
+}
+
 type storagePool struct {
 	storagePoolKey string
 	hosts          []string
@@ -37,14 +56,14 @@ type storagePool struct {
 }
 
 func init() {
-	logger.Formatter = new(logrus.TextFormatter)
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	go func() {
 		// start a loop
-		for {
+		running := true
+		for running {
 			select {
 			case spd := <-storagePoolChan:
-				if sp, ok := storagePoolMap[spd.storagePoolKey]; ok {
+				if sp, ok := storagePoolMap[spd.storagePoolKey]; ok && len(sp.conns) > 0  {
 					fetchStoragePoolChan <- sp
 				} else {
 					var (
@@ -59,71 +78,86 @@ func init() {
 						fetchStoragePoolChan <- sp
 					}
 				}
-			case <-quit:
+			case <-quitStorageLoop:
+				running = false
+				break
+			}
+		}
+	}()
+
+	go func() {
+		// start a loop
+		running := true
+		for running {
+			select {
+			case tpd := <-trackerPoolChan:
+				if tp, ok := trackerPoolMap[tpd.trackerPoolKey]; ok && len(tp.conns) > 0 {
+					fetchTrackerPoolChan <- tp
+				} else {
+					var (
+						tp  *ConnectionPool
+						err error
+					)
+					tp, err = NewConnectionPool([]string{tpd.host}, tpd.port, tpd.minConns, tpd.maxConns)
+					if err != nil {
+						fetchTrackerPoolChan <- err
+					} else {
+						trackerPoolMap[tpd.trackerPoolKey] = tp
+						fetchTrackerPoolChan <- tp
+					}
+				}
+			case <-quitTrackerLoop:
+				running = false
 				break
 			}
 		}
 	}()
 }
-func getTrackerConf(confPath string) (*Tracker, error) {
-	fc := &FdfsConfigParser{}
-	cf, err := fc.Read(confPath)
+
+func NewFdfsClient() (*FdfsClient, error) {
+	tracker, err := getTrackerConf()
 	if err != nil {
-		logger.Errorf("Read conf error :%s", err)
 		return nil, err
 	}
-	trackerListString, _ := cf.RawString("DEFAULT", "tracker_server")
-	trackerList := strings.Split(trackerListString, ",")
 
+	var trackerPool *ConnectionPool = nil
+	for _, host := range tracker.HostList {
+        trackerPool, err = getTrackerPool(host, tracker.Port)
+		if err != nil {
+			continue
+		}
+	}
+
+    if err != nil {
+        return nil, err
+    }
+
+	return &FdfsClient{trackerPool: trackerPool}, nil
+}
+
+func NewFdfsClientByTracker(tracker *TrackerCFG) (*FdfsClient, error) {
 	var (
-		trackerIpList []string
-		trackerPort   string = "22122"
+	    trackerPool *ConnectionPool = nil
+	    err         error           = nil
 	)
 
-	for _, tr := range trackerList {
-		var trackerIp string
-		tr = strings.TrimSpace(tr)
-		parts := strings.Split(tr, ":")
-		trackerIp = parts[0]
-		if len(parts) == 2 {
-			trackerPort = parts[1]
-		}
-		if trackerIp != "" {
-			trackerIpList = append(trackerIpList, trackerIp)
+	for _, host := range tracker.HostList {
+		trackerPool, err = getTrackerPool(host, tracker.Port)
+		if err != nil {
+			continue
 		}
 	}
-	tp, err := strconv.Atoi(trackerPort)
-	tracer := &Tracker{
-		HostList: trackerIpList,
-		Port:     tp,
-	}
-	return tracer, nil
-}
 
-func NewFdfsClient(confPath string) (*FdfsClient, error) {
-	tracker, err := getTrackerConf(confPath)
 	if err != nil {
 		return nil, err
 	}
 
-	trackerPool, err := NewConnectionPool(tracker.HostList, tracker.Port, 10, 150)
-	if err != nil {
-		return nil, err
-	}
-
-	return &FdfsClient{tracker: tracker, trackerPool: trackerPool}, nil
+	return &FdfsClient{trackerPool: trackerPool}, nil
 }
 
-func NewFdfsClientByTracker(tracker *Tracker) (*FdfsClient, error) {
-	trackerPool, err := NewConnectionPool(tracker.HostList, tracker.Port, 10, 150)
-	if err != nil {
-		return nil, err
-	}
-
-	return &FdfsClient{tracker: tracker, trackerPool: trackerPool}, nil
-}
-func ColseFdfsClient() {
-	quit <- true
+func CloseFdfsClient() {
+	quitStorageLoop <- true
+	quitTrackerLoop <- true
 }
 
 func (this *FdfsClient) UploadByFilename(filename string) (*UploadFileResponse, error) {
@@ -291,6 +325,76 @@ func (this *FdfsClient) DownloadToBuffer(remoteFileId string, offset int64, down
 	return store.storageDownloadToBuffer(tc, storeServ, fileBuffer, offset, downloadSize, remoteFilename)
 }
 
+func getTrackerConf() (*TrackerCFG, error) {
+    if trackerCFG != nil {
+    return trackerCFG, nil
+    }
+
+    return loadTrackerConf(trackerConf)
+}
+
+func loadTrackerConf(confPath string) (*TrackerCFG, error) {
+	cf, err := config.ReadDefault(confPath)
+	if err != nil {
+		return nil, err
+	}
+	trackerListString, _ := cf.RawString("DEFAULT", "tracker_server")
+	trackerList := strings.Split(trackerListString, ",")
+
+	var (
+		trackerIpList []string
+		trackerPort   string = "22122"
+	)
+
+	for _, tr := range trackerList {
+		var trackerIp string
+		tr = strings.TrimSpace(tr)
+		parts := strings.Split(tr, ":")
+		trackerIp = parts[0]
+		if len(parts) == 2 {
+			trackerPort = parts[1]
+		}
+		if trackerIp != "" {
+			trackerIpList = append(trackerIpList, trackerIp)
+		}
+	}
+	tp, err := strconv.Atoi(trackerPort)
+	tracer := &TrackerCFG{
+		HostList: trackerIpList,
+		Port:     tp,
+	}
+	return tracer, nil
+}
+
+func getTrackerPool(host string, port int) (*ConnectionPool, error) {
+	var (
+		trackerPoolKey string = fmt.Sprintf("%s-%d", host, port)
+		result         interface{}
+		err            error
+		ok             bool
+	)
+
+	tpd := &trackerPool{
+		trackerPoolKey: trackerPoolKey,
+		host:          host,
+		port:           port,
+		minConns:       trackerMinConn,
+		maxConns:       trackerMaxConn,
+	}
+	trackerPoolChan <- tpd
+	select {
+	case result = <-fetchTrackerPoolChan:
+		var trackerPool *ConnectionPool
+		if err, ok = result.(error); ok {
+			return nil, err
+		} else if trackerPool, ok = result.(*ConnectionPool); ok {
+			return trackerPool, nil
+		} else {
+			return nil, errors.New("none")
+		}
+	}
+}
+
 func (this *FdfsClient) getStoragePool(ipAddr string, port int) (*ConnectionPool, error) {
 	hosts := []string{ipAddr}
 	var (
@@ -304,21 +408,20 @@ func (this *FdfsClient) getStoragePool(ipAddr string, port int) (*ConnectionPool
 		storagePoolKey: storagePoolKey,
 		hosts:          hosts,
 		port:           port,
-		minConns:       10,
-		maxConns:       150,
+		minConns:       storageMinConn,
+		maxConns:       storageMaxConn,
 	}
 	storagePoolChan <- spd
-	for {
-		select {
-		case result = <-fetchStoragePoolChan:
-			var storagePool *ConnectionPool
-			if err, ok = result.(error); ok {
-				return nil, err
-			} else if storagePool, ok = result.(*ConnectionPool); ok {
-				return storagePool, nil
-			} else {
-				return nil, errors.New("none")
-			}
+
+	select {
+	case result = <-fetchStoragePoolChan:
+		var storagePool *ConnectionPool
+		if err, ok = result.(error); ok {
+			return nil, err
+		} else if storagePool, ok = result.(*ConnectionPool); ok {
+			return storagePool, nil
+		} else {
+			return nil, errors.New("none")
 		}
 	}
 }

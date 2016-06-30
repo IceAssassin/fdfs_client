@@ -18,7 +18,7 @@ func getConn(pool *ConnectionPool) {
 }
 
 func TestGetConnection(t *testing.T) {
-	hosts := []string{"10.0.1.32"}
+	hosts := []string{"210.51.190.207"}
 	port := 22122
 	minConns := 10
 	maxConns := 150
@@ -33,7 +33,7 @@ func TestGetConnection(t *testing.T) {
 }
 
 func BenchmarkGetConnection(b *testing.B) {
-	hosts := []string{"10.0.1.32"}
+	hosts := []string{"210.51.190.207"}
 	port := 22122
 	minConns := 10
 	maxConns := 150
